@@ -64,21 +64,3 @@ open cloth-simulation.html
 
 
 
-## Customization
-
-You can modify these parameters in the code:
-
-```javascript
-const width = 10;           // Cloth width
-const height = 10;          // Cloth height
-const segments = 25;        // Grid resolution
-const solverIterations = 5; // Constraint solving accuracy
-const gravity = new THREE.Vector3(0, -9.8, 0); // Gravity force
-```
-
-
-
-
----
-
-**Tip**: Try making small cuts first, then pull on the separated pieces for the most dramatic effect!
