@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloth Cutting Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: monospace;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+       
+        button {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            font-family: monospace;
+        }
+        #cut-btn {
+            background: #e74c3c;
+            color: white;
+        }
+        #cut-btn:hover {
+            background: #c0392b;
+        }
+        .info {
+            font-size: 0.85em;
+            line-height: 1.6;
+            margin-top: 10px;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+   
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+        
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+        camera.position.set(0, 5, 15);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 10, 5);
+        scene.add(directionalLight);
+
+        // Cloth parameters
+        const width = 10;
+        const height = 10;
+        const segments = 25;
+        const restDistance = width / segments;
+
+        // Particle class
+        class Particle {
+            constructor(x, y, z, fixed = false) {
+                this.position = new THREE.Vector3(x, y, z);
+                this.prevPosition = new THREE.Vector3(x, y, z);
+                this.force = new THREE.Vector3(0, 0, 0);
+                this.fixed = fixed;
+                this.mass = 1.0;
+                this.active = true;
+            }
+
+            update(dt) {
+                if (this.fixed || !this.active) return;
+
+                const temp = this.position.clone();
+                this.position.add(
+                    this.position.clone()
+                        .sub(this.prevPosition)
+                        .multiplyScalar(0.99)
+                );
+                this.position.add(
+                    this.force.clone().multiplyScalar(dt * dt / this.mass)
+                );
+                this.prevPosition.copy(temp);
+                this.force.set(0, 0, 0);
+            }
+
+            applyForce(f) {
+                this.force.add(f);
+            }
+        }
+
+        // Constraint class
+        class DistanceConstraint {
+            constructor(p1, p2, distance) {
+                this.p1 = p1;
+                this.p2 = p2;
+                this.restDistance = distance;
+                this.active = true;
+            }
+
+            solve() {
+                if (!this.active || !this.p1.active || !this.p2.active) return;
+
+                const diff = this.p1.position.clone().sub(this.p2.position);
+                const currentDistance = diff.length();
+                
+                if (currentDistance === 0) return;
+
+                const correction = diff.multiplyScalar(
+                    (currentDistance - this.restDistance) / currentDistance
+                );
+
+                const invMass1 = this.p1.fixed ? 0 : 1 / this.p1.mass;
+                const invMass2 = this.p2.fixed ? 0 : 1 / this.p2.mass;
+                const totalInvMass = invMass1 + invMass2;
+
+                if (totalInvMass === 0) return;
+
+                if (!this.p1.fixed) {
+                    this.p1.position.sub(
+                        correction.clone().multiplyScalar(invMass1 / totalInvMass)
+                    );
+                }
+                if (!this.p2.fixed) {
+                    this.p2.position.add(
+                        correction.clone().multiplyScalar(invMass2 / totalInvMass)
+                    );
+                }
+            }
+        }
+
+        // Create particles
+        const particles = [];
+        for (let y = 0; y <= segments; y++) {
+            for (let x = 0; x <= segments; x++) {
+                const posX = (x / segments - 0.5) * width;
+                const posY = 5 - (y / segments) * height;
+                const posZ = 0;
+                const isFixed = y === 0;
+                particles.push(new Particle(posX, posY, posZ, isFixed));
+            }
+        }
+
+        // Create constraints
+        const constraints = [];
+        
+        for (let y = 0; y <= segments; y++) {
+            for (let x = 0; x <= segments; x++) {
+                const i = y * (segments + 1) + x;
+                
+                if (x < segments) {
+                    constraints.push(
+                        new DistanceConstraint(particles[i], particles[i + 1], restDistance)
+                    );
+                }
+                
+                if (y < segments) {
+                    constraints.push(
+                        new DistanceConstraint(
+                            particles[i],
+                            particles[i + segments + 1],
+                            restDistance
+                        )
+                    );
+                }
+            }
+        }
+
+        for (let y = 0; y < segments; y++) {
+            for (let x = 0; x < segments; x++) {
+                const i = y * (segments + 1) + x;
+                
+                constraints.push(
+                    new DistanceConstraint(
+                        particles[i],
+                        particles[i + segments + 2],
+                        restDistance * Math.sqrt(2)
+                    )
+                );
+                
+                constraints.push(
+                    new DistanceConstraint(
+                        particles[i + 1],
+                        particles[i + segments + 1],
+                        restDistance * Math.sqrt(2)
+                    )
+                );
+            }
+        }
+
+        // Create cloth mesh
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array((segments + 1) * (segments + 1) * 3);
+        const indices = [];
+
+        for (let y = 0; y < segments; y++) {
+            for (let x = 0; x < segments; x++) {
+                const a = y * (segments + 1) + x;
+                const b = a + 1;
+                const c = a + segments + 1;
+                const d = c + 1;
+
+                indices.push(a, b, c);
+                indices.push(b, d, c);
+            }
+        }
+
+        geometry.setIndex(indices);
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const material = new THREE.MeshPhongMaterial({
+            color: 0x4a90e2,
+            side: THREE.DoubleSide,
+        });
+
+        const cloth = new THREE.Mesh(geometry, material);
+        scene.add(cloth);
+
+        const wireframe = new THREE.LineSegments(
+            new THREE.WireframeGeometry(geometry),
+            new THREE.LineBasicMaterial({ color: 0x000000 })
+        );
+        scene.add(wireframe);
+
+        // Cut line
+        const cutLine = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 0, 0)
+            ]),
+            new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 3 })
+        );
+        cutLine.visible = false;
+        scene.add(cutLine);
+
+        // Physics
+        const gravity = new THREE.Vector3(0, -9.8, 0);
+        const solverIterations = 5;
+        const dt = 1 / 60;
+
+        // Mouse state
+        const mouseState = {
+            worldPos: new THREE.Vector3(0, 0, 0),
+            leftDown: false,
+            rightDown: false,
+            cutStart: null,
+            cutEnd: null,
+            isCutting: false
+        };
+
+        // Get mouse world position
+        function getMouseWorldPos(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+            
+            const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+            const target = new THREE.Vector3();
+            raycaster.ray.intersectPlane(plane, target);
+            
+            return target;
+        }
+
+        // Mouse handlers
+        renderer.domElement.addEventListener('mousemove', (event) => {
+            const worldPos = getMouseWorldPos(event);
+            if (worldPos) {
+                mouseState.worldPos.copy(worldPos);
+                
+                if (mouseState.isCutting && mouseState.cutStart) {
+                    mouseState.cutEnd = worldPos.clone();
+                    cutLine.geometry.setFromPoints([mouseState.cutStart, mouseState.cutEnd]);
+                    cutLine.visible = true;
+                }
+            }
+        });
+        
+        renderer.domElement.addEventListener('mousedown', (event) => {
+            event.preventDefault();
+            
+            if (event.button === 0) { // Left click
+                mouseState.leftDown = true;
+            } else if (event.button === 2) { // Right click
+                mouseState.rightDown = true;
+                mouseState.isCutting = true;
+                mouseState.cutStart = mouseState.worldPos.clone();
+                mouseState.cutEnd = mouseState.worldPos.clone();
+                cutLine.visible = true;
+            }
+        });
+        
+        renderer.domElement.addEventListener('mouseup', (event) => {
+            if (event.button === 0) { // Left click
+                mouseState.leftDown = false;
+            } else if (event.button === 2) { // Right click
+                if (mouseState.isCutting && mouseState.cutStart && mouseState.cutEnd) {
+                    performCut(mouseState.cutStart, mouseState.cutEnd);
+                    cutLine.visible = false;
+                }
+                mouseState.rightDown = false;
+                mouseState.isCutting = false;
+                mouseState.cutStart = null;
+                mouseState.cutEnd = null;
+            }
+        });
+        
+        // Disable context menu on right click
+        renderer.domElement.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+        });
+
+        // Cutting
+        function performCut(start, end) {
+            const cutThreshold = 0.5;
+            let cutsPerformed = 0;
+            
+            constraints.forEach(constraint => {
+                if (!constraint.active) return;
+                
+                const p1 = constraint.p1.position;
+                const p2 = constraint.p2.position;
+                
+                if (lineSegmentIntersectsCut(start, end, p1, p2, cutThreshold)) {
+                    constraint.active = false;
+                    cutsPerformed++;
+                    
+                    const separation = p2.clone().sub(p1).normalize().multiplyScalar(10);
+                    constraint.p1.applyForce(separation.clone().negate());
+                    constraint.p2.applyForce(separation);
+                }
+            });
+
+            updateMeshTopology();
+        }
+
+        function lineSegmentIntersectsCut(cutStart, cutEnd, p1, p2, threshold) {
+            const distPointToSegment = (point, segStart, segEnd) => {
+                const A = point.x - segStart.x;
+                const B = point.y - segStart.y;
+                const C = segEnd.x - segStart.x;
+                const D = segEnd.y - segStart.y;
+
+                const dot = A * C + B * D;
+                const lenSq = C * C + D * D;
+                let param = -1;
+
+                if (lenSq !== 0) param = dot / lenSq;
+
+                let xx, yy;
+
+                if (param < 0) {
+                    xx = segStart.x;
+                    yy = segStart.y;
+                } else if (param > 1) {
+                    xx = segEnd.x;
+                    yy = segEnd.y;
+                } else {
+                    xx = segStart.x + param * C;
+                    yy = segStart.y + param * D;
+                }
+
+                const dx = point.x - xx;
+                const dy = point.y - yy;
+                return Math.sqrt(dx * dx + dy * dy);
+            };
+
+            const dist1 = distPointToSegment(p1, cutStart, cutEnd);
+            const dist2 = distPointToSegment(p2, cutStart, cutEnd);
+            const dist3 = distPointToSegment(cutStart, p1, p2);
+            const dist4 = distPointToSegment(cutEnd, p1, p2);
+
+            return Math.min(dist1, dist2, dist3, dist4) < threshold;
+        }
+
+        function updateMeshTopology() {
+            const newIndices = [];
+            const indexArray = geometry.index.array;
+
+            for (let i = 0; i < indexArray.length; i += 3) {
+                const a = indexArray[i];
+                const b = indexArray[i + 1];
+                const c = indexArray[i + 2];
+
+                const pa = particles[a];
+                const pb = particles[b];
+                const pc = particles[c];
+
+                if (pa.active && pb.active && pc.active) {
+                    if (hasActiveConstraint(a, b) && 
+                        hasActiveConstraint(b, c) && 
+                        hasActiveConstraint(c, a)) {
+                        newIndices.push(a, b, c);
+                    }
+                }
+            }
+
+            geometry.setIndex(newIndices);
+        }
+
+        function hasActiveConstraint(i1, i2) {
+            return constraints.some(c => 
+                c.active && 
+                ((c.p1 === particles[i1] && c.p2 === particles[i2]) ||
+                 (c.p1 === particles[i2] && c.p2 === particles[i1]))
+            );
+        }
+
+        // Animation
+        function animate() {
+            requestAnimationFrame(animate);
+
+            particles.forEach(p => {
+                if (!p.fixed && p.active) {
+                    p.applyForce(gravity.clone().multiplyScalar(p.mass));
+                    
+                    if (mouseState.leftDown) {
+                        const toMouse = mouseState.worldPos.clone().sub(p.position);
+                        const distance = toMouse.length();
+                        const influenceRadius = 3;
+                        
+                        if (distance < influenceRadius && distance > 0) {
+                            const strength = (1 - distance / influenceRadius) * 100;
+                            p.applyForce(toMouse.normalize().multiplyScalar(strength));
+                        }
+                    }
+                    
+                    if (!mouseState.leftDown && !mouseState.rightDown) {
+                        const dx = (mouseState.worldPos.x - p.position.x) * 0.5;
+                        const dy = (mouseState.worldPos.y - p.position.y) * 0.5;
+                        p.applyForce(new THREE.Vector3(dx, dy, 0));
+                    }
+                }
+            });
+
+            particles.forEach(p => p.update(dt));
+
+            for (let iter = 0; iter < solverIterations; iter++) {
+                constraints.forEach(c => c.solve());
+            }
+
+            const posArray = geometry.attributes.position.array;
+            particles.forEach((p, i) => {
+                posArray[i * 3] = p.position.x;
+                posArray[i * 3 + 1] = p.position.y;
+                posArray[i * 3 + 2] = p.position.z;
+            });
+
+            geometry.attributes.position.needsUpdate = true;
+            geometry.computeVertexNormals();
+            
+            wireframe.geometry.dispose();
+            wireframe.geometry = new THREE.WireframeGeometry(geometry);
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // UI controls
+        const cutBtn = document.getElementById('cut-btn');
+
+        cutBtn.addEventListener('click', () => {
+            // Reset the cloth
+            location.reload();
+        });
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
