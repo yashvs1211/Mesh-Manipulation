@@ -40,12 +40,6 @@ When you right-click and drag:
 4. The mesh topology is updated to reflect the cut
 5. Cut particles receive separation forces for realistic tearing
 
-### Technical Details
-
-- **Grid**: 25×25 segment cloth (676 particles, 1250 triangles)
-- **Constraints**: Structural (horizontal/vertical) + diagonal (shear) constraints
-- **Fixed Points**: Top row particles are anchored
-- **Damping**: 1% velocity damping per frame for stability
 
 ## Installation
 
